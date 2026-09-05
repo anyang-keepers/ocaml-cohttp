@@ -19,7 +19,7 @@ module Reader_flow = struct
         and () = t.buffered <- None in
         available
       else
-        let () = Cstruct.blit_from_string buffer 0 output 0 output_length
+        let () = Cstruct.blit_from_string buffer pos output 0 output_length
         and () = t.buffered <- Some (buffer, pos + output_length) in
         output_length
     in
