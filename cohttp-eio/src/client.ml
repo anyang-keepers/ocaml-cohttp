@@ -4,6 +4,9 @@ module Proxy = Cohttp.Proxy.Forward
 
 type connection = [ Eio.Flow.two_way_ty | Eio.Resource.close_ty ] r
 type t = sw:Switch.t -> Uri.t -> connection
+type response_error = Connection_closed | Invalid_response of string
+exception Response_error of response_error
+
 type proxies = (Uri.t, Uri.t) Proxy.servers
 
 let proxies : (Http.Header.t option * proxies) option Atomic.t =
@@ -26,7 +29,11 @@ let get_proxy uri =
       | Some (Proxy.Direct _) as proxy -> proxy
       | Some (Proxy.Tunnel p) -> Some (Proxy.Tunnel (headers, p)))
 
-let call_on_socket ~sw ?headers ?body ?(chunked = false) meth uri socket =
+let call_on_socket ~sw ?headers ?body ?(chunked = false)
+    ?(on_response_error = function
+      | `Eof -> failwith "connection closed by peer"
+      | `Invalid reason -> failwith reason)
+    meth uri socket =
   let body_length =
     if chunked then None
     else
@@ -57,8 +64,7 @@ let call_on_socket ~sw ?headers ?body ?(chunked = false) meth uri socket =
   in
   let input = Eio.Buf_read.of_flow ~max_size:max_int socket in
   match Io.Response.read input with
-  | `Eof -> failwith "connection closed by peer"
-  | `Invalid reason -> failwith reason
+  | (`Eof | `Invalid _) as error -> on_response_error error
   | `Ok response -> (
       match Cohttp.Response.has_body response with
       | `No -> (response, Eio.Flow.string_source "")
@@ -83,6 +89,17 @@ include
         call_on_socket ~sw ?headers ?body ~chunked meth uri socket
     end)
     (Io.IO)
+
+let call_result (client : t) ~sw ?headers ?body ?(chunked = false) meth uri =
+  try
+    let socket = client ~sw uri in
+    call_on_socket ~sw ?headers ?body ~chunked
+      ~on_response_error:(function
+        | `Eof -> raise (Response_error Connection_closed)
+        | `Invalid reason -> raise (Response_error (Invalid_response reason)))
+      meth uri socket
+    |> Result.ok
+  with Response_error error -> Error error
 
 let make_generic fn = (fn :> t)
 

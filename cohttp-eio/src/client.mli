@@ -31,6 +31,22 @@ val make_generic :
 (** [make_generic connect] is an HTTP client that uses [connect] to get the
     connection to use for a given URI. *)
 
+type response_error = Connection_closed | Invalid_response of string
+
+(** [call_result client ~sw ?headers ?body ?chunked meth uri] performs one
+    request like {!call}, returning HTTP response-head parse failures as a
+    typed error. Connection and transport failures retain the existing
+    exception behavior. *)
+val call_result :
+  t ->
+  sw:Switch.t ->
+  ?headers:Http.Header.t ->
+  ?body:Body.t ->
+  ?chunked:bool ->
+  Http.Method.t ->
+  Uri.t ->
+  ((Http.Response.t * Body.t), response_error) result
+
 val set_proxies :
   ?no_proxy_patterns:string ->
   ?default_proxy:Uri.t ->
